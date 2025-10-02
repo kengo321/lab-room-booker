@@ -18,6 +18,18 @@ export const metadata = {
 }
 
 export default function LoginLayout({ children }) {
-  // ここでは <html> は出さず、そのまま子を返すだけでOK（親レイアウトと合成される）
-  return <>{children}</>
+  return (
+    <>
+      <head>
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <meta name="apple-mobile-web-app-title" content="LabBook" />
+        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+        <link rel="manifest" href="/manifest.webmanifest" />
+        {/* Android系のこれが残ってても問題なし */}
+        {/* <meta name="mobile-web-app-capable" content="yes" /> */}
+      </head>
+      {children}
+    </>
+  )
 }
