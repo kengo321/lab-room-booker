@@ -1,12 +1,23 @@
 import Image from "next/image";
 
-export default function Page() {
-  return (
-    <main className="p-6">
-      <h1 className="text-2xl font-bold">研究室予約アプリへようこそ！</h1>
-    </main>
-  );
+import { redirect } from 'next/navigation'
+import { createSupabaseServerClient } from '@/lib/supabase/server'
+
+export const dynamic = 'force-dynamic'
+
+export default async function Home() {
+  const supabase = await createSupabaseServerClient()
+  const { data: { session } } = await supabase.auth.getSession()
+  redirect(session ? '/book' : '/login')
 }
+
+// export default function Page() {
+//   return (
+//     <main className="p-6">
+//       <h1 className="text-2xl font-bold">研究室予約アプリへようこそ！</h1>
+//     </main>
+//   );
+// }
 
 // export default function Home() {
 //   return (
