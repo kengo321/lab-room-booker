@@ -35,20 +35,21 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="ja">
+    <html
+      lang="ja"
+      style={{ colorScheme: 'light', backgroundColor: '#fff', color: '#111' }}
+    >
       <head>
-        {/* iOS の自動ダーク化を防ぐ */}
         <meta name="color-scheme" content="light" />
-        <meta name="supported-color-schemes" content="light" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="theme-color" content="#ffffff" />
+        <style>{`
+          :root { color-scheme: light !important; }
+          html, body { background:#fff !important; color:#111 !important; }
+        `}</style>
       </head>
-      <body className="antialiased" style={{ colorScheme: 'light' }}>
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
-  );
+  )
 }
 
 
