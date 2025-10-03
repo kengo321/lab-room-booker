@@ -410,7 +410,7 @@ export default function BookPage() {
                   <div className="text-sm text-slate-500">予約はありません</div>
                 ) : list.map(r => {
                   const mine = userId && r.user_id === userId
-                  const who  =  (r.note?.trim() || 'メンバー')
+                  const who  = mine ? 'あなた' : (r.note?.trim() )
                   return (
                     <div key={r.id} className="flex items-center justify-between text-sm border rounded px-2 py-1">
                       <div>
