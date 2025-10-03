@@ -25,6 +25,7 @@ function minutesToTimeStr(min){ const hh=String(Math.floor(min/60)).padStart(2,'
 export default function BookPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
   const [userId, setUserId] = useState(null)
+  const [displayName, setDisplayName] = useState('')
   const [viewDate, setViewDate] = useState(() => startOfMonth(new Date()))
   const [bookings, setBookings] = useState({}) // { 'YYYY-MM-DD': [ ... ] }
   const [loading, setLoading] = useState(true)
@@ -59,6 +60,26 @@ export default function BookPage() {
       if (!mounted) return
       if (error) console.error('getUser error:', error)
       setUserId(data?.user?.id ?? null)
+
+      const user = data?.user
+      const uid = user.id
+
+      // 表示名の取得: profiles > user_metadata > emailローカル部 の順でフォールバック
+      if (!error) {
+        let name = ''
+        const { data: prof } = await supabase
+          .from('Allowed_Signup_Emails')
+          .select('note')
+          .eq('id', uid)
+          .maybeSingle()
+        if (prof?.note?.trim()) name = prof.note.trim()
+
+        setDisplayName(name)
+      } else {
+        setDisplayName('')
+      }
+
+
     })()
     return () => { mounted = false }
   }, [supabase])
@@ -82,7 +103,7 @@ export default function BookPage() {
 
     const { data, error } = await supabase
       .from('bookings')
-      .select('id, day, user_id, start_minute, end_minute')
+      .select('id, day, user_id, start_minute, end_minute, note')
       .gte('day', fromStr)
       .lte('day', toStr)
       .order('day', { ascending: true })
@@ -136,8 +157,9 @@ export default function BookPage() {
       return copy
     })
 
+    //const safeName = (displayName || '').trim()
     const { error } = await supabase.from('bookings').insert({
-      day: dayStr, user_id: userId, start_minute: s, end_minute: e, note: null
+      day: dayStr, user_id: userId, start_minute: s, end_minute: e, note: displayName
     })
 
     if (error) {
@@ -320,20 +342,26 @@ export default function BookPage() {
 
     // スライドアウトしてから閉じる
     const closeWithSlide = async () => {
+      if (submitting) return;
       await controls.start({ y: "100%", transition: { type: "tween", duration: 0.22 } })
       onClose()
     }
 
     return (
-      <AnimatePresence>
+      <AnimatePresence initial={false}>
         {open && selectedDay && (
           <motion.div
+            key="bottomsheet"
+            data-bottomsheet-root
             className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t border-black bg-white"
             initial={{ y: "100%" }}        // 入場は下から
             animate={controls}              // 開閉は controls で制御
             exit={{ y: "100%" }}            // （保険として）Unmount時も下へ
             drag="y"
+            dragListener={!submitting}   
             dragConstraints={{ top: 0, bottom: 0 }}
+            dragElastic={0.08}
+            dragMomentum={false}
             onDragEnd={(_, info) => { if (info.offset.y > 80) closeWithSlide() }}
           >
             {/* つまみ（逆三角形）: タップでも閉じる */}
@@ -359,15 +387,14 @@ export default function BookPage() {
                   <div className="text-sm text-slate-500">予約はありません</div>
                 ) : list.map(r => {
                   const mine = userId && r.user_id === userId
+                  const who  =  (r.note?.trim() || 'メンバー')
                   return (
                     <div key={r.id} className="flex items-center justify-between text-sm border rounded px-2 py-1">
                       <div>
                         <div className="font-mono">
                           {minutesToTimeStr(r.start_minute)}–{minutesToTimeStr(r.end_minute)}
                         </div>
-                        <div className={`text-xs ${mine ? 'text-blue-700' : 'text-slate-500'}`}>
-                          {mine ? 'あなたの予約' : '予約あり'}
-                        </div>
+                        <div className="text-xs text-slate-600">{who}</div>
                       </div>
                       <div>
                         {mine ? (
@@ -445,28 +472,47 @@ export default function BookPage() {
         {/* 横スワイプ担当（transformはここだけ） */}
         <motion.div
           className="px-0 sm:px-4 h-full"
-          drag={sheetOpen ? false : "x"}               // シート開時は横ドラッグを無効化
-          dragConstraints={{ left: 0, right: 0 }}
+          drag={sheetOpen ? false : "x"}  
+          dragListener={!sheetOpen}
+          dragPropagation={true}
+          dragConstraints={{ left: 0, right: 0 }}// シート開時は横ドラッグを無効化
           dragElastic={0.12}
           dragDirectionLock
           dragMomentum={false}
-          style={{ x: parallaxGridX }}                 // ← ここには touchAction を付けない
+          style={{ x: parallaxGridX}}                 // ← ここには touchAction を付けない
           animate={controls}
           onDragEnd={handleDragEnd}
         >
           {/* 縦スクロール担当（transformなしの普通のdiv） */}
           <div
-            className="h-full overflow-y-auto pb-[45vh] allow-vertical-scroll"
-            style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }} 
+            className={`h-full allow-vertical-scroll ${
+              sheetOpen ? 'overflow-y-auto' : 'overflow-y-hidden'
+            }`}
+            style={{
+              //WebkitOverflowScrolling: sheetOpen ? 'touch' : 'auto',
+              // シート閉時は横スワイプだけ許可（縦は無効）
+              //touchAction: sheetOpen ? 'pan-y' : 'pan-x',
+              // iOSの背景バウンドを抑える保険（対応端末）
+              overscrollBehaviorY: sheetOpen ? 'contain' : 'none',
+              WebkitOverflowScrolling: sheetOpen ? 'touch' : 'auto',
+              touchAction: 'pan-y'
+            }}
           >
             <MonthGrid baseDate={viewDate} />
+
+            {/* シート分の余白は開いているときだけ */}
+            {sheetOpen && <div className="pb-[45vh]" />}
+
+            
           </div>
         </motion.div>
       </div>
 
+      
+
       {/* ボトムシート（背景なし） */}
       <BottomSheet
-        open={sheetOpen && !!selectedDay}
+        open={sheetOpen}
         selectedDay={selectedDay}
         bookings={bookings}
         userId={userId}
@@ -478,14 +524,17 @@ export default function BookPage() {
         minutesToTimeStr={minutesToTimeStr}
         onReserve={(dayStr) => reserve(dayStr)}
         onCancel={(dayStr, row) => cancel(dayStr, row)}
-        onClose={() => { setSheetOpen(false); setSelectedDay(null) }}
+        onClose={() => { setSheetOpen(false) }}
         maxHeight="45vh"
       />
 
-      <footer className="px-4 pb-3 text-[11px] text-slate-500 space-y-1">
-        <p>※ 時間帯は <code>開始 &lt; 終了</code>。日またぎ（23:00→01:00 等）は現仕様では不可。</p>
-        <p>※ タイムゾーン差異回避のため、日付は <code>date</code>、時間は分整数で保存。</p>
-      </footer>
+      {/* フッター（カレンダー直下に置く場合）
+            <footer className="mt-4 px-4 pb-3 text-[11px] text-slate-500 space-y-1">
+              <p>※ 時間帯は <code>開始 &lt; 終了</code>。日またぎ（23:00→01:00 等）は現仕様では不可。</p>
+              <p>※ タイムゾーン差異回避のため、日付は <code>date</code>、時間は分整数で保存。</p>
+            </footer> */}
+
+      
     </main>
   )
 }
