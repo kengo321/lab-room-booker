@@ -25,6 +25,13 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+html {
+  color-scheme: light;          /* iOS ダーク反転を防ぐ */
+  -webkit-text-size-adjust: 100%;
+  /* background-color: #fff;       明示的に背景を白に */
+  /* color: #000;                  明示的に文字色を黒に */
+}
+
 html, body {
   height: 100%;
   margin: 0;
