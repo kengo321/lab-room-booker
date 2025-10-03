@@ -1,25 +1,15 @@
 // /app/book/page.js
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser'
+import { motion, useMotionValue, useAnimation, useTransform, AnimatePresence } from 'framer-motion'
 
 /* ---------- 日付ユーティリティ ---------- */
-function startOfMonth(d) {
-  const x = new Date(d.getFullYear(), d.getMonth(), 1); x.setHours(0,0,0,0); return x
-}
-function endOfMonth(d) {
-  const x = new Date(d.getFullYear(), d.getMonth()+1, 0); x.setHours(23,59,59,999); return x
-}
-function addMonths(d, n) {
-  const x = new Date(d); x.setMonth(x.getMonth()+n); return x
-}
-function formatYMD(d) {
-  const y = d.getFullYear()
-  const m = String(d.getMonth()+1).padStart(2,'0')
-  const dd = String(d.getDate()).padStart(2,'0')
-  return `${y}-${m}-${dd}`
-}
+function startOfMonth(d) { const x = new Date(d.getFullYear(), d.getMonth(), 1); x.setHours(0,0,0,0); return x }
+function endOfMonth(d)   { const x = new Date(d.getFullYear(), d.getMonth()+1, 0); x.setHours(23,59,59,999); return x }
+function addMonths(d,n)  { const x = new Date(d); x.setMonth(x.getMonth()+n); return x }
+function formatYMD(d)    { const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const dd=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}` }
 function getMonthMatrix(viewDate) {
   const first = startOfMonth(viewDate)
   const firstWeekday = first.getDay()
@@ -28,34 +18,40 @@ function getMonthMatrix(viewDate) {
   for (let i=0; i<42; i++) { const d = new Date(gridStart); d.setDate(gridStart.getDate()+i); cells.push(d) }
   return cells
 }
-
 /* ---------- 時刻ユーティリティ ---------- */
-function timeStrToMinutes(t /* "HH:MM" */) {
-  const [hh, mm] = t.split(':').map(n => parseInt(n, 10))
-  if (Number.isNaN(hh) || Number.isNaN(mm)) return null
-  return hh * 60 + mm
-}
-function minutesToTimeStr(min) {
-  const hh = String(Math.floor(min / 60)).padStart(2, '0')
-  const mm = String(min % 60).padStart(2, '0')
-  return `${hh}:${mm}`
-}
+function timeStrToMinutes(t){ const [hh,mm]=t.split(':').map(n=>parseInt(n,10)); if(Number.isNaN(hh)||Number.isNaN(mm)) return null; return hh*60+mm }
+function minutesToTimeStr(min){ const hh=String(Math.floor(min/60)).padStart(2,'0'); const mm=String(min%60).padStart(2,'0'); return `${hh}:${mm}` }
 
-/* ---------- コンポーネント ---------- */
 export default function BookPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
-  const [userId, setUserId] = useState(null)            // 書き込み用
+  const [userId, setUserId] = useState(null)
   const [viewDate, setViewDate] = useState(() => startOfMonth(new Date()))
-  const [bookings, setBookings] = useState({})          // { 'YYYY-MM-DD': [ {id,user_id,start_minute,end_minute} , ... ] }
+  const [bookings, setBookings] = useState({}) // { 'YYYY-MM-DD': [ ... ] }
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState(null)
+  const [sheetOpen, setSheetOpen] = useState(false)
 
   const [selectedDay, setSelectedDay] = useState(null)  // 'YYYY-MM-DD' or null
   const [startTime, setStartTime] = useState('09:00')
   const [endTime, setEndTime] = useState('10:00')
 
-  // ログインユーザー取得（layout が未ログインを弾く想定）
+  // セル要素の参照（選択日にスクロール用）
+  const cellRefs = useRef({})
+
+   // ===== Framer Motion: 横スワイプ制御 =====
+  const x = useMotionValue(0)                 // ドラッグ中のXオフセット
+  const controls = useAnimation()             // アニメーション制御
+  const width = typeof window !== 'undefined' ? window.innerWidth : 375
+
+  // 軽いパララックス（ヘッダはゆっくり、グリッドは等速）
+  const parallaxHeaderX = useTransform(x, (v) => v * 0.3)  // 3割の移動量
+  const parallaxGridX   = x                                // 等速
+
+   // スワイプ判定
+  const SWIPE_THRESH = Math.min(120, Math.max(80, width * 0.18)) // 画面幅18% or 80〜120px
+
+  // ログインユーザー取得
   useEffect(() => {
     let mounted = true
     ;(async () => {
@@ -67,12 +63,22 @@ export default function BookPage() {
     return () => { mounted = false }
   }, [supabase])
 
-  // 指定月の予約一覧（その月に含まれる day のもの）を取得
-  async function fetchMonth() {
+  // selectedDay が決まったらシートを開き、セルへスクロール
+  useEffect(() => {
+    if (selectedDay) {
+      setSheetOpen(true)
+      const el = cellRefs.current[selectedDay]
+      // カレンダーをスクロール可能にした上で、セルが見えるように
+      if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [selectedDay])
+
+  // 指定月の予約一覧を取得
+  async function fetchMonth(targetDate = viewDate) {
     setLoading(true)
     setMessage(null)
-    const fromStr = formatYMD(startOfMonth(viewDate))
-    const toStr   = formatYMD(endOfMonth(viewDate))
+    const fromStr = formatYMD(startOfMonth(targetDate))
+    const toStr   = formatYMD(endOfMonth(targetDate))
 
     const { data, error } = await supabase
       .from('bookings')
@@ -99,15 +105,13 @@ export default function BookPage() {
   }
 
   useEffect(() => {
-    fetchMonth()
+    fetchMonth(viewDate)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewDate?.getFullYear(), viewDate?.getMonth()])
 
-  const cells = useMemo(() => getMonthMatrix(viewDate), [viewDate])
+  const today = new Date()
   const todayStr = formatYMD(new Date())
   const isSameMonth = (a,b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth()
-
-  const dayReservations = selectedDay ? (bookings[selectedDay] || []) : []
 
   // 予約作成
   async function reserve(dayStr) {
@@ -116,8 +120,6 @@ export default function BookPage() {
     const e = timeStrToMinutes(endTime)
     if (s == null || e == null) { setMessage('時刻の形式が不正です。'); return }
     if (s < 0 || e > 1440 || s >= e) { setMessage('開始は終了より前、かつ 00:00〜24:00 の範囲で指定してください。'); return }
-
-    // 当日より前の予約禁止（必要なければ外してOK）
     if (dayStr < todayStr) { setMessage('過去日は予約できません。'); return }
 
     setSubmitting(true)
@@ -135,11 +137,7 @@ export default function BookPage() {
     })
 
     const { error } = await supabase.from('bookings').insert({
-      day: dayStr,
-      user_id: userId,
-      start_minute: s,
-      end_minute: e,
-      note: null
+      day: dayStr, user_id: userId, start_minute: s, end_minute: e, note: null
     })
 
     if (error) {
@@ -149,11 +147,8 @@ export default function BookPage() {
         copy[dayStr] = (copy[dayStr] || []).filter(r => r.id !== tempId)
         return copy
       })
-      if (error.code === '23P01') {
-        setMessage('時間帯が他の予約と重なっています。')
-      } else {
-        setMessage('予約に失敗しました: ' + error.message)
-      }
+      if (error.code === '23P01') setMessage('時間帯が他の予約と重なっています。')
+      else setMessage('予約に失敗しました: ' + error.message)
     } else {
       await fetchMonth()
       setMessage('予約しました。')
@@ -195,173 +190,301 @@ export default function BookPage() {
     setSubmitting(false)
   }
 
-  // 右ペイン：選択日のパネル
-  function DayPanel() {
-    if (!selectedDay) return null
-    const isPast = selectedDay < todayStr
+  const handleDragEnd = async (_, info) => {
+    const offsetX = info.offset.x
+
+    // 右→左（次月）
+    if (offsetX <= -SWIPE_THRESH) {
+      // いったん画面外までアニメ → 月+1 → 位置を0へ戻す
+      await controls.start({ x: -width, transition: { type: 'tween', duration: 0.18 } })
+      x.set(0) // 直ちに原点へ
+      setViewDate(prev => startOfMonth(addMonths(prev, +1)))
+      // 月が切り替わった見た目に合わせるため、左から入ってくる感じを演出（任意）
+      await controls.start({ x: width, transition: { duration: 0 } })
+      await controls.start({ x: 0, transition: { type: 'tween', duration: 0.18 } })
+      return
+    }
+
+    // 左→右（前月）
+    if (offsetX >= SWIPE_THRESH) {
+      await controls.start({ x: width, transition: { type: 'tween', duration: 0.18 } })
+      x.set(0)
+      setViewDate(prev => startOfMonth(addMonths(prev, -1)))
+      await controls.start({ x: -width, transition: { duration: 0 } })
+      await controls.start({ x: 0, transition: { type: 'tween', duration: 0.18 } })
+      return
+    }
+
+    // 閾値未満 → 元位置へ戻す
+    await controls.start({ x: 0, transition: { type: 'spring', stiffness: 420, damping: 40 } })
+  }
+
+  /* =========================
+     月グリッド描画（1面分）
+  ==========================*/
+  function MonthGrid({ baseDate }) {
+    const cells = getMonthMatrix(baseDate)
+    const listByDay = bookings
+    const defaultHighlight = isSameMonth(today, baseDate) ? todayStr : null
+    const highlightedDay = selectedDay ?? defaultHighlight
+    
 
     return (
-      <aside className="md:w-80 w-full border rounded p-3 h-max sticky top-4">
-        <div className="font-medium mb-2">{selectedDay} の予約</div>
+      <div className="flex flex-col w-full">
+        {/* 曜日ヘッダ */}
+        <div className="grid grid-cols-7 gap-1 text-center text-xs mb-1 px-4">
+          {['日','月','火','水','木','金','土'].map(d => (
+            <div key={d} className="py-2 font-medium">{d}</div>
+          ))}
+        </div>
 
-        <div className="space-y-2 mb-3 max-h-64 overflow-auto">
-          {dayReservations.length === 0 ? (
-            <div className="text-sm text-slate-500">予約はありません</div>
-          ) : dayReservations.map(r => {
-            const mine = userId && r.user_id === userId
+        {/* 日付セル */}
+        <div className="mx-4 grid grid-cols-7  border-t border-l  border-slate-300 overflow-hidden">
+          {cells.map((d, idx) => {
+            const ymd = formatYMD(d)
+            const isToday = ymd === todayStr
+            const disabledPast = d < new Date(todayStr)
+            const outside = !isSameMonth(d, baseDate)
+            const list = listByDay[ymd] || []
+            const mineCount = userId ? list.filter(r => r.user_id === userId).length : 0
+            const isHighlighted = highlightedDay === ymd
+            
+
             return (
-              <div key={r.id} className="flex items-center justify-between text-sm border rounded px-2 py-1">
-                <div>
-                  <div className="font-mono">{minutesToTimeStr(r.start_minute)}–{minutesToTimeStr(r.end_minute)}</div>
-                  <div className={`text-xs ${mine ? 'text-blue-700' : 'text-slate-500'}`}>
-                    {mine ? 'あなたの予約' : '予約あり'}
-                  </div>
+              <button
+                ref={el => { cellRefs.current[ymd] = el }}
+                type="button"
+                key={idx}
+                onClick={() => setSelectedDay(ymd)}
+                className={
+                  "relative p-1 min-h-[92px] border-r border-b text-left flex flex-col items-start border-slate-300 " +
+                  (outside ? "bg-gray-200 " : "") +
+                  (isToday ? "bg-gray-300 " : "")                   
+                }
+                title="クリックして詳細を表示"
+              >
+                {/* 強調用の太枠（見た目だけ、レイアウトに影響しない） */}
+                {isHighlighted && (
+                  <div className="pointer-events-none absolute inset-0 border-2 border-gray-500"></div>
+                )}
+
+                <div className="mb-1">
+                  <span className="text-sm block">{d.getDate()}</span>
+                  {/* {isToday && (
+                    <span className="text-[10px] px-1 py-0.5 rounded border mt-0.5 inline-block">
+                      今日
+                    </span>
+                  )} */}
                 </div>
-                <div>
-                  {mine ? (
-                    <button
-                      className="text-xs px-2 py-1 border rounded"
-                      disabled={submitting}
-                      onClick={() => cancel(selectedDay, r)}
-                    >
-                      キャンセル
-                    </button>
-                  ) : (
-                    <span className="text-xs text-slate-400">—</span>
+
+                <div className="space-y-1 text-[11px] ">
+                  {list.length > 0 && (
+                    <div className="text-blue-700 text-[10px] px-1 py-0.5 rounded border mt-0.5 inline-block">
+                      {list.length} 件
+                    </div>
                   )}
                 </div>
-              </div>
+              </button>
             )
           })}
         </div>
-
-        <div className="border-t pt-3">
-          <div className="text-sm font-medium mb-2">新規予約</div>
-          <div className="flex items-center gap-2 mb-2">
-            <label className="text-xs w-16">開始</label>
-            <input
-              type="time"
-              className="border rounded px-2 py-1 text-sm w-full"
-              value={startTime}
-              onChange={e => setStartTime(e.target.value)}
-            />
-          </div>
-          <div className="flex items-center gap-2 mb-3">
-            <label className="text-xs w-16">終了</label>
-            <input
-              type="time"
-              className="border rounded px-2 py-1 text-sm w-full"
-              value={endTime}
-              onChange={e => setEndTime(e.target.value)}
-            />
-          </div>
-          <button
-            className="w-full text-sm px-3 py-2 border rounded"
-            disabled={submitting || isPast || !userId}
-            onClick={() => reserve(selectedDay)}
-            title={isPast ? '過去日は不可' : 'この時間で予約'}
-          >
-            予約する
-          </button>
-          <p className="text-xs text-slate-500 mt-2">
-            ※ 同日の他予約と時間帯が重なる場合はDB側でブロックされます。
-          </p>
-        </div>
-      </aside>
+      </div>
     )
   }
 
+  function BottomSheet({
+    open,
+    selectedDay,
+    bookings,
+    userId,
+    submitting,
+    startTime,
+    endTime,
+    setStartTime,
+    setEndTime,
+    minutesToTimeStr,
+    onReserve,
+    onCancel,
+    onClose,                  // ← 親側で setSheetOpen(false); setSelectedDay(null)
+    maxHeight = "45vh",
+  }) {
+    const list = selectedDay ? (bookings[selectedDay] || []) : []
+    const controls = useAnimation()
+
+    // マウント時に上へスライドイン
+    useEffect(() => {
+      if (open) {
+        controls.start({ y: 0, transition: { type: "tween", duration: 0.22 } })
+      }
+    }, [open, controls])
+
+    // スライドアウトしてから閉じる
+    const closeWithSlide = async () => {
+      await controls.start({ y: "100%", transition: { type: "tween", duration: 0.22 } })
+      onClose()
+    }
+
+    return (
+      <AnimatePresence>
+        {open && selectedDay && (
+          <motion.div
+            className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t border-black bg-white"
+            initial={{ y: "100%" }}        // 入場は下から
+            animate={controls}              // 開閉は controls で制御
+            exit={{ y: "100%" }}            // （保険として）Unmount時も下へ
+            drag="y"
+            dragConstraints={{ top: 0, bottom: 0 }}
+            onDragEnd={(_, info) => { if (info.offset.y > 80) closeWithSlide() }}
+          >
+            {/* つまみ（逆三角形）: タップでも閉じる */}
+            <div className="flex justify-center pt-2">
+              <button
+                type="button"
+                onClick={closeWithSlide}
+                aria-label="閉じる"
+                className="w-0 h-0 border-l-[10px] border-r-[10px] border-t-[12px]
+                          border-l-transparent border-r-transparent border-t-slate-400 cursor-pointer"
+              />
+            </div>
+
+            {/* タイトル行（ボタンも置いておくと親切） */}
+            <div className="sticky top-0 z-10 bg-white px-4 py-2 border-b flex items-center justify-between">
+              <div className="font-medium">{selectedDay} の予約</div>
+            </div>
+
+            {/* コンテンツ */}
+            <div className="p-4" style={{ maxHeight, overflow: "auto" }}>
+              <div className="space-y-2 mb-3">
+                {list.length === 0 ? (
+                  <div className="text-sm text-slate-500">予約はありません</div>
+                ) : list.map(r => {
+                  const mine = userId && r.user_id === userId
+                  return (
+                    <div key={r.id} className="flex items-center justify-between text-sm border rounded px-2 py-1">
+                      <div>
+                        <div className="font-mono">
+                          {minutesToTimeStr(r.start_minute)}–{minutesToTimeStr(r.end_minute)}
+                        </div>
+                        <div className={`text-xs ${mine ? 'text-blue-700' : 'text-slate-500'}`}>
+                          {mine ? 'あなたの予約' : '予約あり'}
+                        </div>
+                      </div>
+                      <div>
+                        {mine ? (
+                          <button
+                            className="text-xs px-2 py-1 border rounded"
+                            disabled={submitting}
+                            onClick={() => onCancel(selectedDay, r)}
+                          >
+                            キャンセル
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* 新規予約 */}
+              <div className="border-t pt-3">
+                <div className="text-sm font-medium mb-2">新規予約</div>
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="text-xs w-16">開始</label>
+                  <input
+                    type="time"
+                    className="border rounded px-2 py-1 text-sm w-full"
+                    value={startTime}
+                    onChange={e => setStartTime(e.target.value)}
+                  />
+                </div>
+                <div className="flex items-center gap-2 mb-3">
+                  <label className="text-xs w-16">終了</label>
+                  <input
+                    type="time"
+                    className="border rounded px-2 py-1 text-sm w-full"
+                    value={endTime}
+                    onChange={e => setEndTime(e.target.value)}
+                  />
+                </div>
+                <button
+                  className="w-full text-sm px-3 py-2 border rounded"
+                  disabled={submitting || !userId}
+                  onClick={() => onReserve(selectedDay)}
+                >
+                  予約する
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    )
+  }
+
+
   return (
-    <main className="max-w-5xl mx-auto p-4">
-      <header className="flex items-center justify-between mb-4">
-        <div className="text-xl font-semibold">部屋予約（自由な時間帯）</div>
+    <main
+      className="max-w-5xl mx-auto px-0 sm:px-4 flex flex-col"
+      style={{ height: 'var(--app-vh)' }}
+    >
+      {/* ヘッダ */}
+      <header
+        style={{ x: parallaxHeaderX }}
+        className="sticky top-0 z-20 bg-white/95 backdrop-blur px-4 py-3 flex items-center justify-between select-none border-b"
+      >
+        <div className="text-lg sm:text-xl font-semibold">部屋予約（216号室）</div>
+        <div className="text-lg sm:text-base font-medium">
+          {viewDate.getFullYear()}年 {viewDate.getMonth()+1}月
+        </div>
       </header>
 
-      {message && (
-        <div className="mb-3 p-2 rounded bg-amber-100 border border-amber-200 text-amber-900 text-sm">
-          {message}
-        </div>
-      )}
-
-      <div className="md:flex md:items-start md:gap-4">
-        {/* 左：月カレンダー */}
-        <section className="md:flex-1">
-          <div className="mb-3 flex items-center gap-2">
-            <button className="px-3 py-1 rounded border" onClick={() => setViewDate(addMonths(viewDate, -1))} disabled={loading}>
-              ← 前の月
-            </button>
-            <div className="font-medium">
-              {viewDate.getFullYear()}年 {viewDate.getMonth()+1}月
-            </div>
-            <button className="px-3 py-1 rounded border" onClick={() => setViewDate(addMonths(viewDate, 1))} disabled={loading}>
-              次の月 →
-            </button>
-            <button className="ml-auto px-3 py-1 rounded border" onClick={() => setViewDate(startOfMonth(new Date()))} disabled={loading}>
-              今月へ
-            </button>
+      {/* カレンダー領域（スクロールはこの中だけで完結） */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {/* 横スワイプ担当（transformはここだけ） */}
+        <motion.div
+          className="px-0 sm:px-4 h-full"
+          drag={sheetOpen ? false : "x"}               // シート開時は横ドラッグを無効化
+          dragConstraints={{ left: 0, right: 0 }}
+          dragElastic={0.12}
+          dragDirectionLock
+          dragMomentum={false}
+          style={{ x: parallaxGridX }}                 // ← ここには touchAction を付けない
+          animate={controls}
+          onDragEnd={handleDragEnd}
+        >
+          {/* 縦スクロール担当（transformなしの普通のdiv） */}
+          <div
+            className="h-full overflow-y-auto pb-[45vh] allow-vertical-scroll"
+            style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }} 
+          >
+            <MonthGrid baseDate={viewDate} />
           </div>
-
-          <div className="grid grid-cols-7 gap-1 text-center text-sm mb-1">
-            {['日','月','火','水','木','金','土'].map(d => (
-              <div key={d} className="py-2 font-medium">{d}</div>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-7 gap-1">
-            {cells.map((d, idx) => {
-              const ymd = formatYMD(d)
-              const isToday = ymd === todayStr
-              const disabledPast = d < new Date(todayStr)
-              const outside = !isSameMonth(d, viewDate)
-              const list = bookings[ymd] || []
-              const mineCount = userId ? list.filter(r => r.user_id === userId).length : 0
-
-              return (
-                <button
-                  type="button"
-                  key={idx}
-                  onClick={() => setSelectedDay(ymd)}
-                  className={
-                    "p-2 min-h-[100px] border rounded text-left " +
-                    (outside ? "opacity-40 " : "") +
-                    (isToday ? "ring-2 ring-blue-400 " : "")
-                  }
-                  title="クリックして詳細を表示"
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm">{d.getDate()}</span>
-                    {isToday && <span className="text-[10px] px-1 py-0.5 rounded border">今日</span>}
-                  </div>
-
-                  <div className="space-y-1 text-xs">
-                    {list.length === 0 ? (
-                      <div className="text-slate-400">{disabledPast ? '過去' : '空き'}</div>
-                    ) : (
-                      list.slice(0, 3).map(r => (
-                        <div key={r.id} className={"px-1 py-0.5 rounded border font-mono " + (userId && r.user_id === userId ? "bg-blue-50 border-blue-200" : "bg-slate-50 border-slate-200")}>
-                          {minutesToTimeStr(r.start_minute)}–{minutesToTimeStr(r.end_minute)}
-                          {userId && r.user_id === userId ? '（自分）' : ''}
-                        </div>
-                      ))
-                    )}
-                    {list.length > 3 && (
-                      <div className="text-slate-500">ほか {list.length - 3} 件</div>
-                    )}
-                    {mineCount > 0 && <div className="text-blue-700">あなたの予約 {mineCount} 件</div>}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        </section>
-
-        {/* 右：選択日の詳細 */}
-        <DayPanel />
+        </motion.div>
       </div>
 
-      <footer className="mt-6 text-xs text-slate-500 space-y-1">
-        <p>※ 時間帯は <code>開始 ≤ 終了</code> ではなく <code>開始 &lt; 終了</code> です。日をまたぐ予約（23:00→01:00 等）は現仕様では不可。</p>
-        <p>※ タイムゾーン差異を避けるため、日付は <code>date</code> 型、時間は分単位整数で保存しています。</p>
+      {/* ボトムシート（背景なし） */}
+      <BottomSheet
+        open={sheetOpen && !!selectedDay}
+        selectedDay={selectedDay}
+        bookings={bookings}
+        userId={userId}
+        submitting={submitting}
+        startTime={startTime}
+        endTime={endTime}
+        setStartTime={setStartTime}
+        setEndTime={setEndTime}
+        minutesToTimeStr={minutesToTimeStr}
+        onReserve={(dayStr) => reserve(dayStr)}
+        onCancel={(dayStr, row) => cancel(dayStr, row)}
+        onClose={() => { setSheetOpen(false); setSelectedDay(null) }}
+        maxHeight="45vh"
+      />
+
+      <footer className="px-4 pb-3 text-[11px] text-slate-500 space-y-1">
+        <p>※ 時間帯は <code>開始 &lt; 終了</code>。日またぎ（23:00→01:00 等）は現仕様では不可。</p>
+        <p>※ タイムゾーン差異回避のため、日付は <code>date</code>、時間は分整数で保存。</p>
       </footer>
     </main>
   )

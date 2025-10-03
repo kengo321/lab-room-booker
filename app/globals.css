@@ -24,3 +24,24 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: auto; /* スクロール禁止 */
+}
+
+/* ← ここ重要：main への強制スタイルは外す！
+   （高さ・overflow・flexはコンポーネント側で制御） */
+
+/* 縦スクロールを許可する箱に付ける補助クラス */
+.allow-vertical-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;     /* はみ出し抑制（iOS安定） */
+  -webkit-overflow-scrolling: touch;/* iOS慣性スクロール */
+}
+
+.content-area {
+  flex: 1;                /* 中央部分を自動拡張 */
+  overflow: auto;         /* 必要なら内部だけスクロール可能 */
+}

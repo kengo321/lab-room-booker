@@ -103,14 +103,27 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{ maxWidth: 420, margin: '48px auto' }}>
+    <div
+      style={{
+        maxWidth: 420,
+        margin: '48px auto',
+        paddingLeft: 16,   // ← 左余白
+        paddingRight: 16,  // ← 右余白
+        boxSizing: 'border-box',
+
+        minHeight: '100vh',
+        //display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+      }}
+    >
       <h1 style={{ fontSize: 22, marginBottom: 12 }}>伊藤研究室メンバー用ログイン</h1>
 
       {stage === 'enter-email' && (
         <form onSubmit={sendCode}>
           <input
             type="email"
-            placeholder="you@lab.ac.jp"
+            placeholder="you@ms.saitama-u.ac.jp"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
