@@ -32,6 +32,11 @@ html {
   color: #000;                  /* 明示的に文字色を黒に */
 }
 
+/* app/globals.css など */
+:root {
+  color-scheme: light; /* ← UA の自動ダーク化をやめさせる宣言 */
+}
+
 html, body {
   height: 100%;
   margin: 0;
