@@ -63,23 +63,28 @@ export default function BookPage() {
 
       const user = data?.user
       const uid = user.id
+        if (!user) {
+          setDisplayName('')
+          return
+        }
 
-      // 表示名の取得: profiles > user_metadata > emailローカル部 の順でフォールバック
-      if (!error) {
-        let name = ''
-        const { data: prof } = await supabase
-          .from('Allowed_Signup_Emails')
+        const email = (user.email || '').toLowerCase()
+
+        await supabase
+          .from('allowed_signup_emails')
+          .update({ user_id: uid })
+          .eq('email', (user.email || '').toLowerCase())
+
+        // email をキーに note を取得
+        const { data: row, error: selErr } = await supabase
+          .from('allowed_signup_emails')
           .select('note')
-          .eq('id', uid)
+          .eq('email', email)
           .maybeSingle()
-        if (prof?.note?.trim()) name = prof.note.trim()
 
-        setDisplayName(name)
-      } else {
-        setDisplayName('')
-      }
-
-
+          setUserId(uid)
+        setDisplayName(row?.note?.trim() || '')
+      
     })()
     return () => { mounted = false }
   }, [supabase])
@@ -130,6 +135,10 @@ export default function BookPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewDate?.getFullYear(), viewDate?.getMonth()])
 
+  useEffect(() => {
+    setMessage("")
+  }, [selectedDay])
+
   const today = new Date()
   const todayStr = formatYMD(new Date())
   const isSameMonth = (a,b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth()
@@ -139,9 +148,9 @@ export default function BookPage() {
     if (!userId) return
     const s = timeStrToMinutes(startTime)
     const e = timeStrToMinutes(endTime)
-    if (s == null || e == null) { setMessage('時刻の形式が不正です。'); return }
-    if (s < 0 || e > 1440 || s >= e) { setMessage('開始は終了より前、かつ 00:00〜24:00 の範囲で指定してください。'); return }
-    if (dayStr < todayStr) { setMessage('過去日は予約できません。'); return }
+    if (s == null || e == null) { setMessage('エラー:時刻の形式が不正です。'); return }
+    if (s < 0 || e > 1440 || s >= e) { setMessage('エラー:開始は終了より前、かつ 00:00〜24:00 の範囲で指定してください。'); return }
+    if (dayStr < todayStr) { setMessage('エラー:過去日は予約できません。'); return }
 
     setSubmitting(true)
     setMessage(null)
@@ -169,8 +178,8 @@ export default function BookPage() {
         copy[dayStr] = (copy[dayStr] || []).filter(r => r.id !== tempId)
         return copy
       })
-      if (error.code === '23P01') setMessage('時間帯が他の予約と重なっています。')
-      else setMessage('予約に失敗しました: ' + error.message)
+      if (error.code === '23P01') setMessage('エラー:時間帯が他の予約と重なっています。')
+      else setMessage('エラー:予約に失敗しました: ' + error.message)
     } else {
       await fetchMonth()
       setMessage('予約しました。')
@@ -181,7 +190,7 @@ export default function BookPage() {
   // 予約キャンセル（自分の予約のみ）
   async function cancel(dayStr, row) {
     if (!userId) return
-    if (row.user_id !== userId) { setMessage('自分の予約のみキャンセルできます。'); return }
+    if (row.user_id !== userId) { setMessage('エラー:自分の予約のみキャンセルできます。'); return }
 
     setSubmitting(true)
     setMessage(null)
@@ -205,7 +214,7 @@ export default function BookPage() {
         copy[dayStr] = arr
         return copy
       })
-      setMessage('キャンセルに失敗しました: ' + error.message)
+      setMessage('エラー:キャンセルに失敗しました: ' + error.message)
     } else {
       setMessage('キャンセルしました。')
     }
@@ -314,6 +323,8 @@ export default function BookPage() {
     )
   }
 
+  
+
   function BottomSheet({
     open,
     selectedDay,
@@ -374,6 +385,18 @@ export default function BookPage() {
                           border-l-transparent border-r-transparent border-t-slate-400 cursor-pointer"
               />
             </div>
+
+            {message && (
+              <div
+                className={`text-sm mt-2 text-center ${
+                  message.includes("エラー") 
+                    ? "text-red-600"
+                    : "text-green-600"
+                }`}
+              >
+                {message}
+              </div>
+            )}
 
             {/* タイトル行（ボタンも置いておくと親切） */}
             <div className="sticky top-0 z-10 bg-white px-4 py-2 border-b flex items-center justify-between">
@@ -442,6 +465,7 @@ export default function BookPage() {
                 >
                   予約する
                 </button>
+
               </div>
             </div>
           </motion.div>
@@ -524,7 +548,7 @@ export default function BookPage() {
         minutesToTimeStr={minutesToTimeStr}
         onReserve={(dayStr) => reserve(dayStr)}
         onCancel={(dayStr, row) => cancel(dayStr, row)}
-        onClose={() => { setSheetOpen(false) }}
+        onClose={() => { setSheetOpen(false), setMessage("") }}
         maxHeight="45vh"
       />
 
